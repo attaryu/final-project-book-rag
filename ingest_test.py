@@ -1,10 +1,14 @@
-import sys
 import os
+import sys
 
 import chromadb
 import pymupdf4llm
+from dotenv import load_dotenv
+from google.genai import Client, types
 from langchain_text_splitters import MarkdownTextSplitter
 from sentence_transformers import SentenceTransformer
+
+load_dotenv()
 
 
 def get_embedding_model():
@@ -20,6 +24,14 @@ def get_chroma_collection():
     )
 
     return chroma_collection
+
+
+def get_gemini_response(prompt: str):
+    client = Client(api_key=os.getenv("GEMINI_API_KEY"))
+
+    return client.models.generate_content(
+        model="gemini-2.5-flash-lite", contents=types.Part.from_text(text=prompt)
+    )
 
 
 def start_ingest():
@@ -67,7 +79,7 @@ def start_ingest():
 def query(question: str):
     print("1. pertanyaan:\n")
     print("-" * 20)
-    print(f'"{question}"')
+    print(question)
     print("-" * 20)
 
     embedding_model = get_embedding_model()
@@ -78,11 +90,45 @@ def query(question: str):
 
     results = chroma_collection.query(query_embeddings=[question_vector], n_results=3)
 
-    retrieved_docs = results["documents"][0]
-    context = "\n---\n".join(retrieved_docs)
+    retrieved_doc = results["documents"][0]
+    context = "\n---\n".join(retrieved_doc) + "\n---"
 
-    print("\n ----- hasil ----- \n")
+    print("Hasil")
+    print("-" * 20)
     print(context)
+    print("-" * 20)
+
+    print("\n3. menjawab pertanyaan oleh LLM")
+    prompt = f"""Anda adalah rekan diskusi cerdas yang memahami seluruh isi buku proyek akhir ini dengan sangat baik. Tugas Anda adalah menjawab pertanyaan secara natural, profesional, dan langsung ke inti pembahasan layaknya seorang ahli yang sedang diwawancarai.
+
+ATURAN MENJAWAB:
+1. Jawab HANYA menggunakan informasi yang ada pada bagian [KONTEKS].
+2. Bersikaplah natural. JANGAN PERNAH menggunakan frasa mekanis seperti "Berdasarkan konteks yang diberikan", "Menurut teks di atas", atau "Teks tidak menyebutkan". Jawablah seolah-olah informasi tersebut memang sudah ada di kepala Anda.
+3. Jika informasi yang ditanyakan TIDAK ADA dalam [KONTEKS] atau di luar topik, jangan menebak atau mengarang. Tolak dengan sopan dan natural, contohnya: "Mohon maaf, dokumen proyek akhir ini tidak membahas secara spesifik mengenai [Topik yang ditanyakan]," atau "Hal tersebut di luar ruang lingkup bahasan proyek akhir ini."
+4. Langsung berikan jawaban tanpa mengulang pertanyaan atau merespons instruksi prompt ini.
+
+KONTEKS:
+```
+{context}
+```
+
+PERTANYAAN:
+```
+{question}
+```
+
+Langsung jawab tanpa merespon apa yang saya perintahkan sebelumnya, seperti anda sedang ditanya langsung.
+"""
+    print("Prompt")
+    print("-" * 20)
+    print(prompt)
+    print("-" * 20)
+
+    response = get_gemini_response(prompt)
+    print("Jawaban")
+    print("-" * 20)
+    print(response.candidates[0].content.parts[0].text)
+    print("-" * 20)
 
 
 if __name__ == "__main__":
