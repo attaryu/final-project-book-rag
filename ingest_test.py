@@ -1,11 +1,13 @@
 import os
-import sys
 
 import chromadb
 import pymupdf4llm
 from dotenv import load_dotenv
 from google.genai import Client, types
-from langchain_text_splitters import MarkdownTextSplitter
+from langchain_text_splitters import (
+    MarkdownHeaderTextSplitter,
+    RecursiveCharacterTextSplitter,
+)
 from sentence_transformers import SentenceTransformer
 
 load_dotenv()
@@ -46,15 +48,29 @@ def start_ingest():
     print("berhasil membaca pdf halaman")
 
     print("\n2. melakukan chunking")
-    markdown_text_splitter = MarkdownTextSplitter(chunk_size=1000, chunk_overlap=200)
-    chunks = markdown_text_splitter.create_documents([markdown_text])
-    text_chunks = [chunk.page_content for chunk in chunks]
-    print(f"teks berhasil dipotong sebanyak {len(chunks)} bagian")
+
+    header_to_split = [
+        ("#", "Bab"),
+        ("##", "Sub-bab"),
+        ("###", "Sub-sub-bab"),
+    ]
+
+    markdown_splitter = MarkdownHeaderTextSplitter(headers_to_split_on=header_to_split)
+    header_based_chunks = markdown_splitter.split_text(markdown_text)
+    header_based_text_chunks = [chunk.page_content for chunk in header_based_chunks]
+
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=2000,
+        chunk_overlap=300,
+    )
+    final_chunks = text_splitter.split_text("".join(header_based_text_chunks))
+
+    print(f"teks berhasil dipotong sebanyak {len(final_chunks)} bagian")
 
     print("\n3. membuat embedding")
     embedding_model = get_embedding_model()
-    chunk_vector = embedding_model.encode(text_chunks)
-    for i, (chunk, vector) in enumerate(zip(text_chunks, chunk_vector)):
+    chunk_vector = embedding_model.encode(final_chunks)
+    for i, (chunk, vector) in enumerate(zip(final_chunks, chunk_vector)):
         if i > 10:
             break
 
@@ -69,9 +85,9 @@ def start_ingest():
     print("\n4. menyimpan ke vector database")
     chrome_collection = get_chroma_collection()
     chrome_collection.add(
-        ids=[f"page-{i + 1}_id-{chunk.id}" for i, (chunk) in enumerate(chunks)],
+        ids=[f"page-{i}" for i in enumerate(final_chunks, start=1)],
         embeddings=chunk_vector,
-        documents=text_chunks,
+        documents=final_chunks,
     )
     print("vector berhasil disimpan ke chromadb")
 
@@ -132,5 +148,14 @@ Langsung jawab tanpa merespon apa yang saya perintahkan sebelumnya, seperti anda
 
 
 if __name__ == "__main__":
-    query(sys.argv[1])
-    # start_ingest()
+    print("Pick the execution mode:")
+    print("1. ingest")
+    print("2. ask")
+
+    answer = input("Select one: ")
+
+    if answer == "1":
+        start_ingest()
+    else:
+        question = input("Type your question: ")
+        query(question)
